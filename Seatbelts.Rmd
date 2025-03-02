@@ -1,0 +1,282 @@
+---
+title: "Ex4"
+author: "Vishal Nair 1740105"
+date: "2025-02-09"
+output: pdf_document
+---
+
+### Vishal Nair 1740105
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(ggcorrplot)  
+library(leaps)
+```
+
+### Data Loading and Pre-Processing
+
+```{r}
+# Load and format the dataset
+data(Seatbelts)
+df <- data.frame(Year = floor(time(Seatbelts)),
+                 Month = factor(cycle(Seatbelts), labels = month.abb),
+                 Seatbelts)
+
+# Convert 'law' to a factor (0 = Before Law, 1 = After Law)
+df$law <- as.factor(df$law)
+
+```
+
+### Exploratory Data Analysis
+
+```{r}
+summary(df)
+```
+
+```{r}
+ggplot(df, aes(x = law, y = DriversKilled, fill = law)) +
+  geom_boxplot() +
+  ggtitle("Effect of Seatbelt Law on Driver Fatalities") +
+  xlab("Seatbelt Law (0 = Before, 1 = After)") + ylab("Driver Fatalities") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(df, aes(x = Month, y = DriversKilled, fill = Month)) +
+  geom_boxplot() +
+  ggtitle("Seasonality in Driver Fatalities") +
+  xlab("Month") + ylab("Driver Fatalities") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(df, aes(x = "Front", y = front)) +
+  geom_boxplot(fill = "blue") +
+  geom_boxplot(aes(x = "Rear", y = rear), fill = "red") +
+  ggtitle("Comparison of Front vs. Rear Fatalities") +
+  xlab("Seat Position") + ylab("Number of Fatalities") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(df, aes(x = PetrolPrice, y = DriversKilled)) +
+  geom_point(color = "darkgreen") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Relationship Between Petrol Price and Driver Fatalities") +
+  xlab("Petrol Price") + ylab("Driver Fatalities") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(df, aes(x = kms, y = DriversKilled)) +
+  geom_point(color = "purple") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Kilometers Driven vs. Driver Fatalities") +
+  xlab("Kilometers Driven (Thousands)") + ylab("Driver Fatalities") +
+  theme_minimal()
+
+```
+
+```{r}
+cor_data <- df %>% select(DriversKilled, kms, PetrolPrice)
+
+# Compute Spearman correlation matrix
+cor_matrix <- cor(cor_data, use = "complete.obs", method = "spearman")
+
+# Visualize correlation matrix as a heatmap
+ggcorrplot(cor_matrix,lab=TRUE)
+
+```
+
+### Statistical Analysis with Resampling Techniques
+
+Permutation Test for Anova F-statistic
+
+```{r}
+set.seed(123)
+
+nr <- 10000  # Number of permutations
+perm_F_month <- numeric(nr)  # Store permuted F-statistics for Month
+perm_F_law <- numeric(nr)    # Store permuted F-statistics for Law
+perm_F_interaction <- numeric(nr)  # Store permuted F-statistics for interaction
+
+# Extract relevant variables
+Month <- df$Month
+law <- df$law
+DriversKilled <- df$DriversKilled
+
+# Compute observed ANOVA model
+fit <- lm(DriversKilled ~ Month + law + Month:law)
+anova_obs <- anova(fit)
+
+# Extract observed F-statistics
+obs_F_month <- anova_obs$`F value`[1]   # F-statistic for Month
+obs_F_law <- anova_obs$`F value`[2]     # F-statistic for Law
+obs_F_interaction <- anova_obs$`F value`[3]  # F-statistic for interaction
+
+# Perform permutation test
+for (i in 1:nr) {
+  nDriversKilled <- sample(DriversKilled)  # Shuffle response variable
+  fit_perm <- lm(nDriversKilled ~ Month + law + Month:law) 
+  anova_perm <- anova(fit_perm)
+  
+  # Store permuted F-statistics
+  perm_F_month[i] <- anova_perm$`F value`[1]
+  perm_F_law[i] <- anova_perm$`F value`[2]
+  perm_F_interaction[i] <- anova_perm$`F value`[3]
+}
+
+# Compute empirical p-values
+p_value_month <- mean(perm_F_month >= obs_F_month)
+p_value_law <- mean(perm_F_law >= obs_F_law)
+p_value_interaction <- mean(perm_F_interaction >= obs_F_interaction)
+
+# Print results
+cat("Permutation Test p-value for Month:", p_value_month, "\n")
+cat("Permutation Test p-value for Seatbelt Law:", p_value_law, "\n")
+cat("Permutation Test p-value for Month:Law Interaction:", p_value_interaction, "\n")
+
+# Plot permutation distributions
+par(mfrow = c(1, 3))  # Arrange plots side by side
+
+hist(perm_F_month, breaks = 30, col = "blue", main = "Permutation Test: Month",
+     xlab = "Permuted F-statistic", ylab = "Frequency")
+abline(v = obs_F_month, col = "red", lwd = 2, lty = 2)
+
+hist(perm_F_law, breaks = 30, col = "green", main = "Permutation Test: Seatbelt Law",
+     xlab = "Permuted F-statistic", ylab = "Frequency")
+abline(v = obs_F_law, col = "red", lwd = 2, lty = 2)
+
+hist(perm_F_interaction, breaks = 30, col = "purple", main = "Permutation Test: Interaction",
+     xlab = "Permuted F-statistic", ylab = "Frequency")
+abline(v = obs_F_interaction, col = "red", lwd = 2, lty = 2)
+
+par(mfrow = c(1, 1))  # Reset plot layout
+
+anova_obs
+```
+
+Bootstrap CI for best regression coefficients
+
+```{r}
+# Transform variables
+seatbeltstransformd <- df %>%
+  mutate(
+    pp = (PetrolPrice - mean(PetrolPrice)) / sd(PetrolPrice),  # Standardize petrol price
+    mm = kms / 1000,  # Convert kms to thousands
+    mmc = mm - mean(mm)  # Centering kms
+  )
+
+# Fit the regression model using transformed variables
+fit_transformed <- lm(DriversKilled ~ mmc + pp, data = seatbeltstransformd)
+
+# Display regression summary
+summary(fit_transformed)
+
+set.seed(123)
+
+# Number of bootstrap resamples
+nr <- 10000  
+boot_t <- matrix(NA, nrow = nr, ncol = length(coef(fit_transformed)))  # Store bootstrap t-values
+boot_theta <- matrix(NA, nrow = nr, ncol = length(coef(fit_transformed)))  # Store bootstrap coefficients
+
+# Perform bootstrap resampling
+for (i in 1:nr) {
+  boot_indices <- sample(1:nrow(seatbeltstransformd), replace = TRUE)  # Resample with replacement
+  boot_sample <- seatbeltstransformd[boot_indices, ]  # Get bootstrap sample
+  boot_fit <- lm(DriversKilled ~ mmc + pp, data = boot_sample)  # Fit model
+  
+  boot_theta[i, ] <- coef(boot_fit)  # Store bootstrapped coefficients
+  boot_t[i, ] <- (coef(boot_fit) - coef(fit_transformed)) / summary(boot_fit)$coefficients[, 2]  # Compute t-values
+}
+
+# Compute Bootstrap Estimates and Standard Errors
+bootstrap_mean <- colMeans(boot_theta)  # Mean of bootstrapped estimates
+bootstrap_se <- apply(boot_theta, 2, sd)  # Standard deviation (SE) of bootstrapped estimates
+
+# Compute 95% CI using bootstrap-t method
+ci_lower <- coef(fit_transformed) + summary(fit_transformed)$coefficients[, 2] * apply(boot_t, 2, function(x) quantile(x, 0.025))
+ci_upper <- coef(fit_transformed) + summary(fit_transformed)$coefficients[, 2] * apply(boot_t, 2, function(x) quantile(x, 0.975))
+
+
+# Print results
+cat("Bootstrap Results:\n")
+results_df <- data.frame(
+  Estimate = bootstrap_mean,
+  Std_Error = bootstrap_se,
+  CI_Lower = ci_lower,
+  CI_Upper = ci_upper
+)
+print(results_df)
+# Plot histograms for each regression coefficient
+par(mfrow = c(2, 2))  # Arrange plots in a grid
+
+for (i in 1:length(coef(fit_transformed))) {
+  hist(boot_theta[, i], breaks = 30, col = "blue", main = paste("Bootstrap CI for", names(coef(fit_transformed))[i]),
+       xlab = paste("Bootstrapped", names(coef(fit_transformed))[i]), ylab = "Frequency")
+  abline(v = c(ci_lower[i], ci_upper[i]), col = "red", lwd = 2, lty = 2)  # Add CI lines
+}
+
+par(mfrow = c(1, 1))  # Reset plot layout
+
+```
+
+```{r}
+# Check normality of differences
+diff_fatalities <- df$front - df$rear
+shapiro.test(diff_fatalities)  # Shapiro-Wilk test for normality
+# Q-Q plot
+qqnorm(diff_fatalities)
+qqline(diff_fatalities)
+```
+
+```{r}
+set.seed(123)  # For reproducibility
+
+nr <- 10000  # Number of permutations
+perm_diffs <- numeric(nr)  # Store permuted mean differences
+cnt <- 0  # Initialize counter
+
+# Compute observed mean difference
+obs_diff <- mean(df$front) - mean(df$rear)
+
+# Combine both groups into a single vector
+vect <- c(df$front, df$rear)
+n1 <- length(df$front)
+n2 <- length(df$rear)
+total <- n1 + n2
+
+# Perform permutation test
+for (i in 1:nr) {
+  d <- sample(vect, total)  # Shuffle the combined dataset
+  ne <- d[1:n1]  # First half assigned to front fatalities
+  co <- d[(n1+1):total]  # Second half assigned to rear fatalities
+  perm_diffs[i] <- mean(ne) - mean(co)  # Compute new mean difference
+  
+  if (perm_diffs[i] > obs_diff) { 
+    cnt <- cnt + 1  # Count how many times permuted diff is greater than observed
+  }
+}
+
+# Compute empirical p-value
+p_value_perm <- cnt / nr
+
+# Print results
+cat("Observed Mean Difference:", obs_diff, "\n")
+cat("Permutation Test p-value:", p_value_perm, "\n")
+
+# Plot permutation results
+hist(perm_diffs, breaks = 30, col = "blue", main = "Permutation Test: Front vs. Rear Fatalities",
+     xlab = "Permuted Mean Difference", ylab = "Frequency")
+abline(v = obs_diff, col = "red", lwd = 2, lty = 2)
+
+```
